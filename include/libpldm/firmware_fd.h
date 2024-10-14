@@ -5,6 +5,7 @@
 
 #include <libpldm/pldm.h>
 #include <libpldm/base.h>
+#include <libpldm/libpldm-fd-sizes.h>
 
 /* Device-specific callbacks provided by an application */
 struct pldm_fd_ops {
@@ -13,6 +14,8 @@ struct pldm_fd_ops {
         const uint8_t **descriptors);
 };
 
+/* Static storage can be allocated with
+ * PLDM_SIZEOF_PLDM_FD macro */
 struct pldm_fd;
 
 pldm_requester_rc_t pldm_fd_setup(struct pldm_fd *fd,
