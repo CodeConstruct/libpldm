@@ -410,6 +410,23 @@ enum pldm_firmware_update_downstream_device_update_supported {
 	PLDM_FWUP_DOWNSTREAM_DEVICE_UPDATE_SUPPORTED = 1
 };
 
+#ifndef PLDM_FIRMWARE_MAX_STRING
+#define PLDM_FIRMWARE_MAX_STRING 32
+#endif
+
+struct pldm_firmware_string {
+	enum pldm_firmware_update_string_type str_type;
+	uint8_t str_len;
+	uint8_t str_data[PLDM_FIRMWARE_MAX_STRING];
+};
+
+struct pldm_firmware_version {
+	uint32_t stamp;
+	struct pldm_firmware_string str;
+	uint8_t date[PLDM_FWUP_COMPONENT_RELEASE_DATA_LEN];
+};
+
+
 /** @struct pldm_package_header_information
  *
  *  Structure representing fixed part of package header information
