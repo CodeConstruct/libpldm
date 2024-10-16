@@ -31,6 +31,27 @@ static pldm_requester_rc_t pldm_fd_reply_error(uint8_t ccode,
 	return PLDM_REQUESTER_SUCCESS;
 }
 
+
+static void pldm_fd_set_state(struct pldm_fd *fd,
+	enum pldm_firmware_device_states state) {
+	/* pldm_fd_set_idle should be used instead */
+	assert(state != PLDM_FD_STATE_IDLE);
+
+	if (fd->state == state) {
+		return;
+	}
+
+	fd->prev_state = fd->state;
+	fd->state = fd->state;
+}
+
+// static void pldm_fd_set_idle(struct pldm_fd *fd,
+// 	enum pldm_get_status_reason_code_values reason) {
+// 	fd->prev_state = fd->state;
+// 	fd->ua_tid_set = false;
+// 	fd->reason = reason;
+// }
+
 static pldm_requester_rc_t pldm_fd_qdi(struct pldm_fd *fd,
 	const struct pldm_header_info *hdr,
 	const void *req LIBPLDM_CC_UNUSED, size_t req_len,
@@ -195,6 +216,70 @@ static pldm_requester_rc_t pldm_fd_fw_param(struct pldm_fd *fd,
 	return PLDM_REQUESTER_SUCCESS;
 }
 
+static pldm_requester_rc_t pldm_fd_request_update(struct pldm_fd *fd,
+	const struct pldm_header_info *hdr,
+	const void *req, size_t req_len,
+	void *resp, size_t *resp_len,
+	pldm_tid_t tid)
+{
+	uint8_t ccode;
+
+	if (req_len < sizeof(struct pldm_msg)) {
+		return pldm_fd_reply_error(PLDM_ERROR_INVALID_LENGTH, hdr, resp, resp_len);
+	}
+	const struct pldm_msg *req_msg = req;
+	size_t req_payload_len = req_len - sizeof(struct pldm_msg);
+
+	if (*resp_len < sizeof(struct pldm_msg)) {
+		return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
+	}
+	struct pldm_msg *resp_msg = resp;
+	size_t resp_payload_len = *resp_len - sizeof(struct pldm_msg);
+
+	if (fd->state != PLDM_FD_STATE_IDLE) {
+		return pldm_fd_reply_error(PLDM_FWUP_ALREADY_IN_UPDATE_MODE, hdr, resp, resp_len);
+	}
+
+	uint32_t max_transfer_size;
+	uint16_t num_of_comp;
+	uint8_t max_outstanding_transfer_req;
+	uint16_t pkg_data_len;
+	uint8_t comp_image_set_ver_str_type;
+	struct variable_field comp_img_set_ver_str;
+
+	ccode = decode_request_update_req(req_msg, req_payload_len,
+		&max_transfer_size,
+		&num_of_comp,
+		&max_outstanding_transfer_req,
+		&pkg_data_len,
+		&comp_image_set_ver_str_type,
+		&comp_img_set_ver_str);
+	if (ccode) {
+		return pldm_fd_reply_error(ccode, hdr, resp_msg, resp_len);
+	}
+
+	/* No metadata nor pkg data */
+	ccode = encode_request_update_resp(hdr->instance,
+		0, 0, resp_msg, &resp_payload_len);
+	if (ccode) {
+		return pldm_fd_reply_error(ccode, hdr, resp_msg, resp_len);
+	}
+
+	fd->max_transfer = max_transfer_size;
+	if (fd->max_transfer < PLDM_FWUP_BASELINE_TRANSFER_SIZE) {
+		// Don't let it be zero
+		fd->max_transfer = PLDM_FWUP_BASELINE_TRANSFER_SIZE;
+	}
+	fd->ua_tid = tid;
+	fd->ua_tid_set = true;
+	// TODO: Update update_timestamp_fd_t1
+
+	pldm_fd_set_state(fd, PLDM_FD_STATE_LEARN_COMPONENTS);
+	*resp_len = resp_payload_len + sizeof(struct pldm_msg_hdr);
+
+	return PLDM_REQUESTER_SUCCESS;
+}
+
 static pldm_requester_rc_t pldm_fd_handle_resp(struct pldm_fd *fd, pldm_tid_t tid,
 	const void *pldm_msg, size_t msg_len,
 	void *resp_msg, size_t *resp_len)
@@ -268,7 +353,7 @@ pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
 			break;
 		default:
 			/* Requests must come from the same TID that requested the update */
-			if (tid != fd->ua_tid) {
+			if (fd->ua_tid_set && tid != fd->ua_tid) {
 				return pldm_fd_reply_error(PLDM_ERROR_NOT_READY, &hdr, resp_msg, resp_len);
 			}
 	}
@@ -280,6 +365,10 @@ pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
 			break;
 		case PLDM_GET_FIRMWARE_PARAMETERS:
 			rc = pldm_fd_fw_param(fd, &hdr, payload, payload_len, resp_msg, resp_len);
+			break;
+		case PLDM_REQUEST_UPDATE:
+			rc = pldm_fd_request_update(fd, &hdr, payload, payload_len, resp_msg, resp_len,
+				tid);
 			break;
 		default:
 			// rc = pldm_fd_reply_error(PLDM_ERROR_UNSUPPORTED_PLDM_CMD, &hdr, resp_msg, resp_len);

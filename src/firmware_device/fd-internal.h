@@ -73,6 +73,10 @@ struct pldm_fd {
     } specific;
 
     pldm_tid_t ua_tid;
+    bool ua_tid_set;
+
+    /* Maximum size allowed by the UA */
+    uint32_t max_transfer;
 
     /* Timestamp for FD T1 timeout, milliseconds */
     // TODO: datatype?

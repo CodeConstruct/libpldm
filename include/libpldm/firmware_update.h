@@ -1217,6 +1217,37 @@ int encode_request_update_req(uint8_t instance_id, uint32_t max_transfer_size,
 			      const struct variable_field *comp_img_set_ver_str,
 			      struct pldm_msg *msg, size_t payload_length);
 
+/** @brief Decode PLDM request message for RequestUpdate
+ *
+ *  @param[in] msg - Message
+ *  @param[in] payload_length - Length of request message payload
+ *  @param[in] max_transfer_size - Maximum size of the variable payload allowed
+ *                                 to be requested via RequestFirmwareData
+ *                                 command
+ *  @param[in] num_of_comp - Total number of components that will be passed to
+ *                           the FD during the update
+ *  @param[in] max_outstanding_transfer_req - Total number of outstanding
+ * 											  RequestFirmwareData
+ * commands that can be sent by the FD
+ *  @param[in] pkg_data_len - Value of the FirmwareDevicePackageDataLength field
+ *                            present in firmware package header
+ *  @param[in] comp_image_set_ver_str_type - StringType of
+ *                                           ComponentImageSetVersionString
+ *  @param[in] comp_img_set_ver_str - Component Image Set version information
+ *
+ *  @return pldm_completion_codes
+ *
+ *  @note Caller is responsible for memory alloc and dealloc of param
+ *        'msg.payload'
+ */
+int decode_request_update_req(const struct pldm_msg *msg, size_t payload_length,
+			      uint32_t *max_transfer_size,
+			      uint16_t *num_of_comp,
+			      uint8_t *max_outstanding_transfer_req,
+			      uint16_t *pkg_data_len,
+			      uint8_t *comp_image_set_ver_str_type,
+			      struct variable_field *comp_img_set_ver_str);
+
 /** @brief Decode a RequestUpdate response message
  *
  *  @param[in] msg - Response message
@@ -1231,6 +1262,23 @@ int decode_request_update_resp(const struct pldm_msg *msg,
 			       size_t payload_length, uint8_t *completion_code,
 			       uint16_t *fd_meta_data_len,
 			       uint8_t *fd_will_send_pkg_data);
+
+/** @brief Create PLDM response message for RequestUpdate
+ *
+ *	@param[in] instance_id - Message's instance id
+ *	@param[in] completion_code - CompletionCode
+ *	@param[in,out] msg - Message will be written to this
+ *  @param[in] payload_length - Length of response message payload
+ *
+ *	@return pldm_completion_codes
+ *
+ *	@note  Caller is responsible for memory alloc and dealloc of param
+ *		   'msg.payload'
+ */
+int encode_request_update_resp(uint8_t instance_id,
+			       uint16_t fd_meta_data_len,
+			       uint8_t fd_will_send_pkg_data,
+			       struct pldm_msg *msg, size_t *payload_length);
 
 /** @brief Create PLDM request message for PassComponentTable
  *

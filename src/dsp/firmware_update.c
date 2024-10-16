@@ -1464,6 +1464,44 @@ int encode_request_update_req(uint8_t instance_id, uint32_t max_transfer_size,
 	return PLDM_SUCCESS;
 }
 
+LIBPLDM_ABI_TESTING
+int decode_request_update_req(const struct pldm_msg *msg, size_t payload_length,
+			      uint32_t *max_transfer_size,
+			      uint16_t *num_of_comp,
+			      uint8_t *max_outstanding_transfer_req,
+			      uint16_t *pkg_data_len,
+			      uint8_t *comp_image_set_ver_str_type,
+			      struct variable_field *comp_img_set_ver_str)
+{
+	int rc;
+	struct pldm_msgbuf _buf;
+	struct pldm_msgbuf *buf = &_buf;
+	rc = pldm_msgbuf_init_cc(buf, 0, msg->payload, payload_length);
+	if (rc) {
+		return rc;
+	}
+
+	pldm_msgbuf_extract_p(buf, max_transfer_size);
+	pldm_msgbuf_extract_p(buf, num_of_comp);
+	pldm_msgbuf_extract_p(buf, max_outstanding_transfer_req);
+	pldm_msgbuf_extract_p(buf, pkg_data_len);
+	pldm_msgbuf_extract_p(buf, comp_image_set_ver_str_type);
+	uint8_t ver_len;
+	pldm_msgbuf_extract_p(buf, &ver_len);
+	void* rem = NULL;
+	size_t rem_len;
+	rc = pldm_msgbuf_span_remaining(buf, &rem, &rem_len);
+	if (rc) {
+		return rc;
+	}
+	if (rem_len != ver_len) {
+		return PLDM_ERROR_INVALID_DATA;
+	}
+	comp_img_set_ver_str->ptr = rem;
+	comp_img_set_ver_str->length = rem_len;
+	return PLDM_SUCCESS;
+}
+
 LIBPLDM_ABI_STABLE
 int decode_request_update_resp(const struct pldm_msg *msg,
 			       size_t payload_length, uint8_t *completion_code,
@@ -1491,6 +1529,47 @@ int decode_request_update_resp(const struct pldm_msg *msg,
 	*fd_meta_data_len = le16toh(response->fd_meta_data_len);
 	*fd_will_send_pkg_data = response->fd_will_send_pkg_data;
 
+	return PLDM_SUCCESS;
+}
+
+LIBPLDM_ABI_TESTING
+int encode_request_update_resp(uint8_t instance_id,
+			       uint16_t fd_meta_data_len,
+			       uint8_t fd_will_send_pkg_data,
+			       struct pldm_msg *msg, size_t *payload_length)
+{
+	int rc;
+	struct pldm_msgbuf _buf;
+	struct pldm_msgbuf *buf = &_buf;
+
+	struct pldm_header_info header = {
+		.instance = instance_id,
+		.msg_type = PLDM_RESPONSE,
+		.pldm_type = PLDM_FWUP,
+		.command = PLDM_REQUEST_UPDATE,
+	};
+	rc = pack_pldm_header(&header, &(msg->hdr));
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_init_cc(buf, 0, msg->payload, *payload_length);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_insert(buf, fd_meta_data_len);
+	if (rc) {
+		return rc;
+	}
+	rc = pldm_msgbuf_insert(buf, fd_will_send_pkg_data);
+	if (rc) {
+		return rc;
+	}
+
+	/* TODO: DSP0267 1.3.0 adds GetPackageDataMaximumTransferSize */
+
+	*payload_length = *payload_length - buf->remaining;
 	return PLDM_SUCCESS;
 }
 
