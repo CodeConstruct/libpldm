@@ -883,6 +883,29 @@ int encode_query_device_identifiers_req(uint8_t instance_id,
 					size_t payload_length,
 					struct pldm_msg *msg);
 
+/** @brief Create a PLDM response message for QueryDeviceIdentifiers
+ *
+ *  @param[in] instance_id - Message's instance id
+ *  @param[in] device_identifiers_len - Length of descriptor_data
+ *  @param[in] descriptor_count - Number of descriptors
+ *  @param[in] descriptor_data - Device descriptor data
+ *  @param[in,out] msg - Message will be written to this
+ *  @param[in,out] payload_length - Size of the response message payload, updated
+ *				    with used length.
+ *
+ *  @return pldm_completion_codes
+ *
+ *  @note  Caller is responsible for memory alloc and dealloc of param
+ *         'msg.payload'
+ */
+// LIBPLDM_CC_NONNULL
+int encode_query_device_identifiers_resp(uint8_t instance_id,
+					 uint32_t device_identifiers_len,
+					 uint8_t descriptor_count,
+					 const uint8_t *descriptor_data,
+					 struct pldm_msg *msg,
+					 size_t *payload_length);
+
 /** @brief Decode QueryDeviceIdentifiers response message
  *
  *  @param[in] msg - Response message
@@ -953,6 +976,42 @@ int decode_get_firmware_parameters_resp_comp_entry(
 	struct pldm_component_parameter_entry *component_data,
 	struct variable_field *active_comp_ver_str,
 	struct variable_field *pending_comp_ver_str);
+
+/** @brief Encode a GetFirmwareParameters response
+ *
+ *  @param[in] instance_id - Message's instance id
+ *  @param[in] resp_data - Fixed part of parameter data
+ *  @param[in] active_comp_image_set_ver_str - Active ImageSet
+ *  @param[in] pending_comp_image_set_ver_str - Pending ImageSet
+ *  @param[in,out] msg - Message will be written to this
+ *  @param[in,out] payload_length - Size of the response message payload, updated
+ *				    with used length.
+ *
+ *  @return pldm_completion_codes
+ */
+int encode_get_firmware_parameters_resp(
+	uint8_t instance_id,
+	const struct pldm_get_firmware_parameters_resp *resp_data,
+	const struct variable_field *active_comp_image_set_ver_str,
+	const struct variable_field *pending_comp_image_set_ver_str,
+	struct pldm_msg *msg, size_t *payload_length);
+
+/** @brief Encode a ComponentParameterTable entry
+ *
+ *  @param[in] comp - Fixed part of the entry
+ *  @param[in] active_ver - Version string
+ *  @param[in] pending_ver - Version string
+ *  @param[in,out] payload - Message will be written to this
+ *  @param[in,out] payload_length - Size of payload, updated
+ *				    with used length.
+ *
+ *  @return pldm_completion_codes
+ */
+int encode_get_firmware_parameters_resp_comp_entry (
+	const struct pldm_component_parameter_entry *comp,
+	const struct variable_field *active_ver,
+	const struct variable_field *pending_ver,
+	uint8_t *payload, size_t *payload_length);
 
 /** @brief Create a PLDM request message for QueryDownstreamDevices
  *
