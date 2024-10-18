@@ -443,11 +443,11 @@ pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
 			/* Information or cancel commands are always allowed */
 			break;
 		case PLDM_REQUEST_UPDATE:
-			/* Command handler will check TID */
+			/* Command handler will set TID */
 			break;
 		default:
 			/* Requests must come from the same TID that requested the update */
-			if (fd->ua_tid_set && tid != fd->ua_tid) {
+			if (!fd->ua_tid_set || tid != fd->ua_tid) {
 				return pldm_fd_reply_error(PLDM_ERROR_NOT_READY, &hdr, resp_msg, resp_len);
 			}
 	}
