@@ -13,18 +13,18 @@
 
 static pldm_requester_rc_t pldm_fd_reply_error(uint8_t ccode,
 	const struct pldm_header_info *req_hdr,
-	void *resp_msg, size_t *resp_len) {
+	struct pldm_msg *resp, size_t *resp_payload_len) {
 
 	int rc;
 
-	/* Header plus 1 byte completion code */
-	if (*resp_len < sizeof(struct pldm_msg_hdr) + 1) {
+	/* 1 byte completion code */
+	if (*resp_payload_len < 1) {
 		return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
 	}
-	*resp_len = sizeof(struct pldm_msg_hdr) + 1;
+	*resp_payload_len = 1;
 
 	rc = encode_cc_only_resp(req_hdr->instance,
-		PLDM_FWUP, req_hdr->command, ccode, resp_msg);
+		PLDM_FWUP, req_hdr->command, ccode, resp);
 	if (rc != PLDM_SUCCESS) {
 		return PLDM_REQUESTER_RECV_FAIL;
 	}
@@ -54,15 +54,15 @@ static void pldm_fd_set_state(struct pldm_fd *fd,
 
 static pldm_requester_rc_t pldm_fd_qdi(struct pldm_fd *fd,
 	const struct pldm_header_info *hdr,
-	const void *req LIBPLDM_CC_UNUSED, size_t req_len,
-	void *resp_msg, size_t *resp_len)
+	const struct pldm_msg *req LIBPLDM_CC_UNUSED, size_t req_payload_len,
+	struct pldm_msg *resp, size_t *resp_payload_len)
 {
 	uint8_t ccode;
 
 	/* QDI has no request data */
-	if (req_len != PLDM_QUERY_DEVICE_IDENTIFIERS_REQ_BYTES) {
+	if (req_payload_len != PLDM_QUERY_DEVICE_IDENTIFIERS_REQ_BYTES) {
 		return pldm_fd_reply_error(PLDM_ERROR_INVALID_LENGTH,
-			hdr, resp_msg, resp_len);
+			hdr, resp, resp_payload_len);
 	}
 
 	/* Retrieve platform-specific data */
@@ -72,38 +72,31 @@ static pldm_requester_rc_t pldm_fd_qdi(struct pldm_fd *fd,
 	ccode = fd->ops->device_identifiers(fd->ops_ctx,
 		&descriptors_len, &descriptor_count, &descriptors);
 	if (ccode) {
-		return pldm_fd_reply_error(ccode, hdr, resp_msg, resp_len);
+		return pldm_fd_reply_error(ccode, hdr, resp, resp_payload_len);
 	}
 
-	if (*resp_len < sizeof(struct pldm_msg_hdr)) {
-		return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
-	}
-	size_t payload_len = *resp_len - sizeof(struct pldm_msg_hdr);
-
-	struct pldm_msg *r = resp_msg;
 	ccode = encode_query_device_identifiers_resp(hdr->instance,
 		descriptors_len, descriptor_count, descriptors,
-		r, &payload_len);
+		resp, resp_payload_len);
 
 	if (ccode) {
-		return pldm_fd_reply_error(ccode, hdr, resp_msg, resp_len);
+		return pldm_fd_reply_error(ccode, hdr, resp, resp_payload_len);
 	}
 
-	*resp_len = sizeof(struct pldm_msg_hdr) + payload_len;
 	return PLDM_REQUESTER_SUCCESS;
 }
 
 static pldm_requester_rc_t pldm_fd_fw_param(struct pldm_fd *fd,
 	const struct pldm_header_info *hdr,
-	const void *req LIBPLDM_CC_UNUSED, size_t req_len,
-	void *resp_msg, size_t *resp_len)
+	const struct pldm_msg *req LIBPLDM_CC_UNUSED, size_t req_payload_len,
+	struct pldm_msg *resp, size_t *resp_payload_len)
 {
 	uint8_t ccode;
 
 	/* No request data */
-	if (req_len != PLDM_GET_FIRMWARE_PARAMETERS_REQ_BYTES) {
+	if (req_payload_len != PLDM_GET_FIRMWARE_PARAMETERS_REQ_BYTES) {
 		return pldm_fd_reply_error(PLDM_ERROR_INVALID_LENGTH,
-			hdr, resp_msg, resp_len);
+			hdr, resp, resp_payload_len);
 	}
 
 	/* Retrieve platform-specific data */
@@ -111,27 +104,22 @@ static pldm_requester_rc_t pldm_fd_fw_param(struct pldm_fd *fd,
 	const struct pldm_firmware_component_standalone **entries;
 	ccode = fd->ops->components(fd->ops_ctx, &entry_count, &entries);
 	if (ccode) {
-		return pldm_fd_reply_error(ccode, hdr, resp_msg, resp_len);
+		return pldm_fd_reply_error(ccode, hdr, resp, resp_payload_len);
 	}
 	struct pldm_firmware_string active;
 	struct pldm_firmware_string pending;
 	ccode = fd->ops->imageset_versions(fd->ops_ctx, &active, &pending);
 	if (ccode) {
-		return pldm_fd_reply_error(ccode, hdr, resp_msg, resp_len);
+		return pldm_fd_reply_error(ccode, hdr, resp, resp_payload_len);
 	}
 
-
-	if (*resp_len < sizeof(struct pldm_msg_hdr)) {
-		return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
-	}
 
 	struct pldm_msgbuf _buf;
 	struct pldm_msgbuf *buf = &_buf;
 
-	struct pldm_msg *r = resp_msg;
-	ccode = pldm_msgbuf_init_cc(buf, 0, r->payload, *resp_len - sizeof(struct pldm_msg_hdr));
+	ccode = pldm_msgbuf_init_cc(buf, 0, resp->payload, *resp_payload_len);
 	if (ccode) {
-		return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
+		return PLDM_REQUESTER_RECV_FAIL;
 	}
 
 	/* Add the fixed parameters */
@@ -155,13 +143,13 @@ static pldm_requester_rc_t pldm_fd_fw_param(struct pldm_fd *fd,
 			.ptr = pending.str_data,
 			.length = pending.str_len,
 		};
-		size_t payload_len = buf->remaining;
+		size_t len = buf->remaining;
 		ccode = encode_get_firmware_parameters_resp(hdr->instance,
-			&fwp, &active_ver, &pending_ver, r, &payload_len);
+			&fwp, &active_ver, &pending_ver, resp, &len);
 		if (ccode) {
-			return pldm_fd_reply_error(ccode, hdr, resp_msg, resp_len);
+			return pldm_fd_reply_error(ccode, hdr, resp, resp_payload_len);
 		}
-		ccode = pldm_msgbuf_increment(buf, payload_len);
+		ccode = pldm_msgbuf_increment(buf, len);
 		if (ccode) {
 			return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
 		}
@@ -197,47 +185,35 @@ static pldm_requester_rc_t pldm_fd_fw_param(struct pldm_fd *fd,
 		};
 
 		void* out = NULL;
-		size_t payload_len;
-		if (pldm_msgbuf_peek_remaining(buf, &out, &payload_len)) {
+		size_t len;
+		if (pldm_msgbuf_peek_remaining(buf, &out, &len)) {
 			return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
 		}
 		ccode = encode_get_firmware_parameters_resp_comp_entry(
-			&comp, &active_ver, &pending_ver, out, &payload_len);
+			&comp, &active_ver, &pending_ver, out, &len);
 		if (ccode) {
-			return pldm_fd_reply_error(ccode, hdr, resp_msg, resp_len);
+			return pldm_fd_reply_error(ccode, hdr, resp, resp_payload_len);
 		}
-		ccode = pldm_msgbuf_increment(buf, payload_len);
+		ccode = pldm_msgbuf_increment(buf, len);
 		if (ccode) {
 			return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
 		}
 	}
 
-	*resp_len = *resp_len - buf->remaining;
+	*resp_payload_len = *resp_payload_len - buf->remaining;
 	return PLDM_REQUESTER_SUCCESS;
 }
 
 static pldm_requester_rc_t pldm_fd_request_update(struct pldm_fd *fd,
 	const struct pldm_header_info *hdr,
-	const void *req, size_t req_len,
-	void *resp, size_t *resp_len,
+	const struct pldm_msg *req, size_t req_payload_len,
+	struct pldm_msg *resp, size_t *resp_payload_len,
 	pldm_tid_t tid)
 {
 	uint8_t ccode;
 
-	if (req_len < sizeof(struct pldm_msg)) {
-		return pldm_fd_reply_error(PLDM_ERROR_INVALID_LENGTH, hdr, resp, resp_len);
-	}
-	const struct pldm_msg *req_msg = req;
-	size_t req_payload_len = req_len - sizeof(struct pldm_msg);
-
-	if (*resp_len < sizeof(struct pldm_msg)) {
-		return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
-	}
-	struct pldm_msg *resp_msg = resp;
-	size_t resp_payload_len = *resp_len - sizeof(struct pldm_msg);
-
 	if (fd->state != PLDM_FD_STATE_IDLE) {
-		return pldm_fd_reply_error(PLDM_FWUP_ALREADY_IN_UPDATE_MODE, hdr, resp, resp_len);
+		return pldm_fd_reply_error(PLDM_FWUP_ALREADY_IN_UPDATE_MODE, hdr, resp, resp_payload_len);
 	}
 
 	uint32_t max_transfer_size;
@@ -247,7 +223,7 @@ static pldm_requester_rc_t pldm_fd_request_update(struct pldm_fd *fd,
 	uint8_t comp_image_set_ver_str_type;
 	struct variable_field comp_img_set_ver_str;
 
-	ccode = decode_request_update_req(req_msg, req_payload_len,
+	ccode = decode_request_update_req(req, req_payload_len,
 		&max_transfer_size,
 		&num_of_comp,
 		&max_outstanding_transfer_req,
@@ -255,14 +231,13 @@ static pldm_requester_rc_t pldm_fd_request_update(struct pldm_fd *fd,
 		&comp_image_set_ver_str_type,
 		&comp_img_set_ver_str);
 	if (ccode) {
-		return pldm_fd_reply_error(ccode, hdr, resp_msg, resp_len);
+		return pldm_fd_reply_error(ccode, hdr, resp, resp_payload_len);
 	}
 
 	/* No metadata nor pkg data */
-	ccode = encode_request_update_resp(hdr->instance,
-		0, 0, resp_msg, &resp_payload_len);
+	ccode = encode_request_update_resp(hdr->instance, 0, 0, resp, resp_payload_len);
 	if (ccode) {
-		return pldm_fd_reply_error(ccode, hdr, resp_msg, resp_len);
+		return pldm_fd_reply_error(ccode, hdr, resp, resp_payload_len);
 	}
 
 	fd->max_transfer = max_transfer_size;
@@ -275,14 +250,13 @@ static pldm_requester_rc_t pldm_fd_request_update(struct pldm_fd *fd,
 	// TODO: Update update_timestamp_fd_t1
 
 	pldm_fd_set_state(fd, PLDM_FD_STATE_LEARN_COMPONENTS);
-	*resp_len = resp_payload_len + sizeof(struct pldm_msg_hdr);
 
 	return PLDM_REQUESTER_SUCCESS;
 }
 
 /* Wrapper around ops->update_component() that first checks that the component
  * is in the list returned from ops->components() */
-static enum pldm_component_response_codes 
+static enum pldm_component_response_codes
 pldm_fd_check_update_component(struct pldm_fd *fd, bool update,
     	const struct pldm_firmware_update_component *comp) {
 
@@ -314,36 +288,24 @@ pldm_fd_check_update_component(struct pldm_fd *fd, bool update,
 
 static pldm_requester_rc_t pldm_fd_pass_comp(struct pldm_fd *fd,
 	const struct pldm_header_info *hdr,
-	const void *req, size_t req_len,
-	void *resp, size_t *resp_len)
+	const struct pldm_msg *req, size_t req_payload_len,
+	struct pldm_msg *resp, size_t *resp_payload_len)
 {
 	uint8_t ccode;
 
-	if (req_len < sizeof(struct pldm_msg)) {
-		return pldm_fd_reply_error(PLDM_ERROR_INVALID_LENGTH, hdr, resp, resp_len);
-	}
-	const struct pldm_msg *req_msg = req;
-	size_t req_payload_len = req_len - sizeof(struct pldm_msg);
-
-	if (*resp_len < sizeof(struct pldm_msg)) {
-		return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
-	}
-	struct pldm_msg *resp_msg = resp;
-	size_t resp_payload_len = *resp_len - sizeof(struct pldm_msg);
-
 	if (fd->state != PLDM_FD_STATE_LEARN_COMPONENTS) {
-		return pldm_fd_reply_error(PLDM_FWUP_INVALID_STATE_FOR_COMMAND, hdr, resp, resp_len);
+		return pldm_fd_reply_error(PLDM_FWUP_INVALID_STATE_FOR_COMMAND, hdr, resp, resp_payload_len);
 	}
 
 	uint8_t transfer_flag;
 
 	/* Some portions are unused for PassComponentTable */
-	struct pldm_firmware_update_component comp = { 
+	struct pldm_firmware_update_component comp = {
 		.size = 0,
 		.flags.value = 0,
 	};
 
-	ccode = decode_pass_component_table_req(req_msg, req_payload_len,
+	ccode = decode_pass_component_table_req(req, req_payload_len,
 		&transfer_flag,
 		&comp.comp_classification,
 		&comp.comp_identifier,
@@ -352,7 +314,7 @@ static pldm_requester_rc_t pldm_fd_pass_comp(struct pldm_fd *fd,
 		&comp.comp_ver_str_type,
 		&comp.comp_ver_str);
 	if (ccode) {
-		return pldm_fd_reply_error(ccode, hdr, resp, resp_len);
+		return pldm_fd_reply_error(ccode, hdr, resp, resp_payload_len);
 	}
 
 	uint8_t comp_response_code = pldm_fd_check_update_component(fd, false, &comp);
@@ -361,11 +323,10 @@ static pldm_requester_rc_t pldm_fd_pass_comp(struct pldm_fd *fd,
 	uint8_t comp_resp = (comp_response_code != 0);
 
 	ccode = encode_pass_component_table_resp(hdr->instance,
-		comp_resp, comp_response_code, resp_msg, &resp_payload_len);
+		comp_resp, comp_response_code, resp, resp_payload_len);
 	if (ccode) {
-		return pldm_fd_reply_error(ccode, hdr, resp, resp_len);
+		return pldm_fd_reply_error(ccode, hdr, resp, resp_payload_len);
 	}
-	*resp_len = resp_payload_len + sizeof(struct pldm_msg_hdr);
 
 	if (transfer_flag & PLDM_END) {
 		pldm_fd_set_state(fd, PLDM_FD_STATE_READY_XFER);
@@ -375,8 +336,7 @@ static pldm_requester_rc_t pldm_fd_pass_comp(struct pldm_fd *fd,
 }
 
 static pldm_requester_rc_t pldm_fd_handle_resp(struct pldm_fd *fd, pldm_tid_t tid,
-	const void *pldm_msg, size_t msg_len,
-	void *resp_msg, size_t *resp_len)
+	const void *msg, size_t msg_len)
 {
 	// TODO
 	return PLDM_REQUESTER_INVALID_SETUP;
@@ -399,32 +359,41 @@ pldm_requester_rc_t pldm_fd_setup(struct pldm_fd *fd,
 	return PLDM_REQUESTER_SUCCESS;
 }
 
+/* A response should only be used when this returns PLDM_SUCCESS, and *resp_len > 0 */
 LIBPLDM_ABI_TESTING
 pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
-	const void *pldm_msg, size_t msg_len,
+	const void *req_msg, size_t req_len,
 	void *resp_msg, size_t *resp_len)
 {
 	uint8_t rc;
 
-	if (msg_len < sizeof(struct pldm_msg_hdr)) {
+	/* Space for header plus completion code */
+	if (*resp_len < sizeof(struct pldm_msg_hdr)+1) {
+		return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
+	}
+	size_t resp_payload_len = *resp_len - sizeof(struct pldm_msg_hdr);
+	struct pldm_msg *resp = resp_msg;
+
+	if (req_len < sizeof(struct pldm_msg_hdr)) {
 		return PLDM_REQUESTER_INVALID_RECV_LEN;
 	}
+	size_t req_payload_len = req_len - sizeof(struct pldm_msg_hdr);
+	const struct pldm_msg *req = req_msg;
 
 	struct pldm_header_info hdr;
-
-	rc = unpack_pldm_header(pldm_msg, &hdr);
+	rc = unpack_pldm_header(&req->hdr, &hdr);
 	if (rc != PLDM_SUCCESS) {
 		return PLDM_REQUESTER_RECV_FAIL;
 	}
-	const void* payload = pldm_msg + sizeof(struct pldm_msg_hdr);
-	size_t payload_len = msg_len - sizeof(struct pldm_msg_hdr);
 
 	if (hdr.pldm_type != PLDM_FWUP) {
+		/* Caller should not have passed non-pldmfw */
 		return PLDM_REQUESTER_RECV_FAIL;
 	}
 
 	if (hdr.msg_type == PLDM_RESPONSE) {
-		return pldm_fd_handle_resp(fd, tid, pldm_msg, msg_len, resp_msg, resp_len);
+		*resp_len = 0;
+		return pldm_fd_handle_resp(fd, tid, req_msg, req_len);
 	}
 
 	if (hdr.msg_type != PLDM_REQUEST) {
@@ -448,28 +417,31 @@ pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
 		default:
 			/* Requests must come from the same TID that requested the update */
 			if (!fd->ua_tid_set || tid != fd->ua_tid) {
-				return pldm_fd_reply_error(PLDM_ERROR_NOT_READY, &hdr, resp_msg, resp_len);
+				return pldm_fd_reply_error(PLDM_ERROR_NOT_READY, &hdr, resp, &resp_payload_len);
 			}
 	}
 
 	/* Dispatch command */
 	switch (hdr.command) {
 		case PLDM_QUERY_DEVICE_IDENTIFIERS:
-			rc = pldm_fd_qdi(fd, &hdr, payload, payload_len, resp_msg, resp_len);
+			rc = pldm_fd_qdi(fd, &hdr, req, req_payload_len, resp, &resp_payload_len);
 			break;
 		case PLDM_GET_FIRMWARE_PARAMETERS:
-			rc = pldm_fd_fw_param(fd, &hdr, payload, payload_len, resp_msg, resp_len);
+			rc = pldm_fd_fw_param(fd, &hdr, req, req_payload_len, resp, &resp_payload_len);
 			break;
 		case PLDM_REQUEST_UPDATE:
-			rc = pldm_fd_request_update(fd, &hdr, payload, payload_len, resp_msg, resp_len,
+			rc = pldm_fd_request_update(fd, &hdr, req, req_payload_len, resp, &resp_payload_len,
 				tid);
 			break;
 		case PLDM_PASS_COMPONENT_TABLE:
-			rc = pldm_fd_pass_comp(fd, &hdr, payload, payload_len, resp_msg, resp_len);
+			rc = pldm_fd_pass_comp(fd, &hdr, req, req_payload_len, resp, &resp_payload_len);
 			break;
 		default:
-			// rc = pldm_fd_reply_error(PLDM_ERROR_UNSUPPORTED_PLDM_CMD, &hdr, resp_msg, resp_len);
-			rc = PLDM_SUCCESS;
+			rc = pldm_fd_reply_error(PLDM_ERROR_UNSUPPORTED_PLDM_CMD, &hdr, resp, &resp_payload_len);
+	}
+
+	if (rc == PLDM_SUCCESS) {
+		*resp_len = resp_payload_len + sizeof(struct pldm_msg_hdr);
 	}
 
 	return rc;
