@@ -280,6 +280,100 @@ static pldm_requester_rc_t pldm_fd_request_update(struct pldm_fd *fd,
 	return PLDM_REQUESTER_SUCCESS;
 }
 
+/* Wrapper around ops->update_component() that first checks that the component
+ * is in the list returned from ops->components() */
+static enum pldm_component_response_codes 
+pldm_fd_check_update_component(struct pldm_fd *fd, bool update,
+    	const struct pldm_firmware_update_component *comp) {
+
+	uint8_t ccode;
+
+	uint16_t entry_count;
+	const struct pldm_firmware_component_standalone **entries;
+	ccode = fd->ops->components(fd->ops_ctx, &entry_count, &entries);
+	if (ccode) {
+		return PLDM_CRC_COMP_NOT_SUPPORTED;
+	}
+
+	bool found = false;
+	for (uint16_t i = 0; i < entry_count; i++) {
+		if (entries[i]->comp_classification == comp->comp_classification
+			&& entries[i]->comp_identifier == comp->comp_identifier
+			&& entries[i]->comp_classification_index == comp->comp_classification_index) {
+			found = true;
+			break;
+		}
+	}
+	if (found) {
+		return fd->ops->update_component(fd->ops_ctx, update, comp);
+	} else {
+		return PLDM_CRC_COMP_NOT_SUPPORTED;
+	}
+}
+
+
+static pldm_requester_rc_t pldm_fd_pass_comp(struct pldm_fd *fd,
+	const struct pldm_header_info *hdr,
+	const void *req, size_t req_len,
+	void *resp, size_t *resp_len)
+{
+	uint8_t ccode;
+
+	if (req_len < sizeof(struct pldm_msg)) {
+		return pldm_fd_reply_error(PLDM_ERROR_INVALID_LENGTH, hdr, resp, resp_len);
+	}
+	const struct pldm_msg *req_msg = req;
+	size_t req_payload_len = req_len - sizeof(struct pldm_msg);
+
+	if (*resp_len < sizeof(struct pldm_msg)) {
+		return PLDM_REQUESTER_RESP_MSG_TOO_SMALL;
+	}
+	struct pldm_msg *resp_msg = resp;
+	size_t resp_payload_len = *resp_len - sizeof(struct pldm_msg);
+
+	if (fd->state != PLDM_FD_STATE_LEARN_COMPONENTS) {
+		return pldm_fd_reply_error(PLDM_FWUP_INVALID_STATE_FOR_COMMAND, hdr, resp, resp_len);
+	}
+
+	uint8_t transfer_flag;
+
+	/* Some portions are unused for PassComponentTable */
+	struct pldm_firmware_update_component comp = { 
+		.size = 0,
+		.flags.value = 0,
+	};
+
+	ccode = decode_pass_component_table_req(req_msg, req_payload_len,
+		&transfer_flag,
+		&comp.comp_classification,
+		&comp.comp_identifier,
+		&comp.comp_classification_index,
+		&comp.comp_comparison_stamp,
+		&comp.comp_ver_str_type,
+		&comp.comp_ver_str);
+	if (ccode) {
+		return pldm_fd_reply_error(ccode, hdr, resp, resp_len);
+	}
+
+	uint8_t comp_response_code = pldm_fd_check_update_component(fd, false, &comp);
+
+	/* Component Response Code is 0 for ComponentResponse, 1 otherwise */
+	uint8_t comp_resp = (comp_response_code != 0);
+
+	ccode = encode_pass_component_table_resp(hdr->instance,
+		comp_resp, comp_response_code, resp_msg, &resp_payload_len);
+	if (ccode) {
+		return pldm_fd_reply_error(ccode, hdr, resp, resp_len);
+	}
+	*resp_len = resp_payload_len + sizeof(struct pldm_msg_hdr);
+
+	if (transfer_flag & PLDM_END) {
+		pldm_fd_set_state(fd, PLDM_FD_STATE_READY_XFER);
+	}
+
+	return PLDM_SUCCESS;
+}
+
 static pldm_requester_rc_t pldm_fd_handle_resp(struct pldm_fd *fd, pldm_tid_t tid,
 	const void *pldm_msg, size_t msg_len,
 	void *resp_msg, size_t *resp_len)
@@ -369,6 +463,9 @@ pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
 		case PLDM_REQUEST_UPDATE:
 			rc = pldm_fd_request_update(fd, &hdr, payload, payload_len, resp_msg, resp_len,
 				tid);
+			break;
+		case PLDM_PASS_COMPONENT_TABLE:
+			rc = pldm_fd_pass_comp(fd, &hdr, payload, payload_len, resp_msg, resp_len);
 			break;
 		default:
 			// rc = pldm_fd_reply_error(PLDM_ERROR_UNSUPPORTED_PLDM_CMD, &hdr, resp_msg, resp_len);

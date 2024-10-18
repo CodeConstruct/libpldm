@@ -1308,6 +1308,14 @@ int encode_pass_component_table_req(
 	const struct variable_field *comp_ver_str, struct pldm_msg *msg,
 	size_t payload_length);
 
+int decode_pass_component_table_req(const struct pldm_msg *msg,
+	size_t payload_length,
+	uint8_t *transfer_flag,
+	uint16_t *comp_classification, uint16_t *comp_identifier,
+	uint8_t *comp_classification_index, uint32_t *comp_comparison_stamp,
+	uint8_t *comp_ver_str_type,
+	struct variable_field *comp_ver_str);
+
 /** @brief Decode PassComponentTable response message
  *
  *  @param[in] msg - Response message
@@ -1323,6 +1331,12 @@ int decode_pass_component_table_resp(const struct pldm_msg *msg,
 				     uint8_t *completion_code,
 				     uint8_t *comp_resp,
 				     uint8_t *comp_resp_code);
+
+int encode_pass_component_table_resp(uint8_t instance_id,
+				     uint8_t comp_resp,
+				     uint8_t comp_resp_code,
+				     struct pldm_msg *msg,
+				     size_t *payload_length);
 
 /** @brief Create PLDM request message for UpdateComponent
  *

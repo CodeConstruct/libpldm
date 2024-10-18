@@ -5,6 +5,7 @@
 
 #include <libpldm/pldm.h>
 #include <libpldm/base.h>
+#include <libpldm/utils.h>
 #include <libpldm/firmware_update.h>
 
 struct pldm_firmware_component_standalone {
@@ -19,8 +20,23 @@ struct pldm_firmware_component_standalone {
 	bitfield32_t capabilities_during_update;
 };
 
+/* An entry for Pass Component Table or Update Component */
+struct pldm_firmware_update_component {
+	uint16_t comp_classification;
+	uint16_t comp_identifier;
+	uint8_t comp_classification_index;
+	uint32_t comp_comparison_stamp;
+	uint8_t comp_ver_str_type;
+	struct variable_field comp_ver_str;
+
+	/* Not set for PassComponentTable */
+	uint32_t size;
+	/* Not set for PassComponentTable */
+	bitfield32_t flags;
+};
+
 /* Device-specific callbacks provided by an application.
- * All return a ccode. */
+ * Functions return a ccode unless otherwise specified */
 struct pldm_fd_ops {
 	uint8_t (*device_identifiers)(void* ctx,
 		uint32_t *ret_descriptors_len, uint8_t *ret_descriptors_count,
@@ -33,6 +49,9 @@ struct pldm_fd_ops {
 	uint8_t (*imageset_versions)(void* ctx,
 		struct pldm_firmware_string *active,
 		struct pldm_firmware_string *pending);
+
+	enum pldm_component_response_codes (*update_component)(void *ctx,
+		bool update, const struct pldm_firmware_update_component *comp);
 };
 
 /* Static storage can be allocated with

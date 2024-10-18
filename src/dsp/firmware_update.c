@@ -1633,6 +1633,46 @@ int encode_pass_component_table_req(uint8_t instance_id, uint8_t transfer_flag,
 	return PLDM_SUCCESS;
 }
 
+
+LIBPLDM_ABI_TESTING
+int decode_pass_component_table_req(const struct pldm_msg *msg,
+	size_t payload_length,
+	uint8_t *transfer_flag,
+	uint16_t *comp_classification, uint16_t *comp_identifier,
+	uint8_t *comp_classification_index, uint32_t *comp_comparison_stamp,
+	uint8_t *comp_ver_str_type,
+	struct variable_field *comp_ver_str) {
+
+	int rc;
+	struct pldm_msgbuf _buf;
+	struct pldm_msgbuf *buf = &_buf;
+	rc = pldm_msgbuf_init_cc(buf, 0, msg->payload, payload_length);
+	if (rc) {
+		return rc;
+	}
+
+	pldm_msgbuf_extract_p(buf, transfer_flag);
+	pldm_msgbuf_extract_p(buf, comp_classification);
+	pldm_msgbuf_extract_p(buf, comp_identifier);
+	pldm_msgbuf_extract_p(buf, comp_classification_index);
+	pldm_msgbuf_extract_p(buf, comp_comparison_stamp);
+	pldm_msgbuf_extract_p(buf, comp_ver_str_type);
+	uint8_t ver_len;
+	pldm_msgbuf_extract_p(buf, &ver_len);
+	void* rem = NULL;
+	size_t rem_len;
+	rc = pldm_msgbuf_span_remaining(buf, &rem, &rem_len);
+	if (rc) {
+		return rc;
+	}
+	if (rem_len != ver_len) {
+		return PLDM_ERROR_INVALID_DATA;
+	}
+	comp_ver_str->ptr = rem;
+	comp_ver_str->length = rem_len;
+	return PLDM_SUCCESS;
+}
+
 LIBPLDM_ABI_STABLE
 int decode_pass_component_table_resp(const struct pldm_msg *msg,
 				     const size_t payload_length,
@@ -1668,6 +1708,42 @@ int decode_pass_component_table_resp(const struct pldm_msg *msg,
 	*comp_resp = response->comp_resp;
 	*comp_resp_code = response->comp_resp_code;
 
+	return PLDM_SUCCESS;
+}
+
+LIBPLDM_ABI_TESTING
+int encode_pass_component_table_resp(uint8_t instance_id,
+				     uint8_t comp_resp,
+				     uint8_t comp_resp_code,
+				     struct pldm_msg *msg,
+				     size_t *payload_length) 
+{
+	int rc;
+	struct pldm_msgbuf _buf;
+	struct pldm_msgbuf *buf = &_buf;
+
+	rc = encode_pldm_header_only(PLDM_RESPONSE, instance_id, PLDM_FWUP,
+				       PLDM_PASS_COMPONENT_TABLE, msg);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_init_cc(buf, 0, msg->payload, *payload_length);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_insert(buf, comp_resp);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_insert(buf, comp_resp_code);
+	if (rc) {
+		return rc;
+	}
+
+	*payload_length = *payload_length - buf->remaining;
 	return PLDM_SUCCESS;
 }
 
