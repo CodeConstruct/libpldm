@@ -25,14 +25,12 @@ struct pldm_firmware_update_component {
 	uint16_t comp_classification;
 	uint16_t comp_identifier;
 	uint8_t comp_classification_index;
-	uint32_t comp_comparison_stamp;
-	uint8_t comp_ver_str_type;
-	struct variable_field comp_ver_str;
+	struct pldm_firmware_version version;
 
 	/* Not set for PassComponentTable */
-	uint32_t size;
+	uint32_t comp_image_size;
 	/* Not set for PassComponentTable */
-	bitfield32_t flags;
+	bitfield32_t update_option_flags;
 };
 
 /* Device-specific callbacks provided by an application.
@@ -59,7 +57,8 @@ struct pldm_fd_ops {
 struct pldm_fd;
 
 pldm_requester_rc_t pldm_fd_setup(struct pldm_fd *fd,
-    size_t pldm_fd_size,
+	size_t pldm_fd_size,
+	uint32_t max_transfer,
 	const struct pldm_fd_ops *ops, void *ops_ctx);
 
 pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,

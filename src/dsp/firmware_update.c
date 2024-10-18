@@ -857,7 +857,7 @@ int encode_get_firmware_parameters_resp(
 	struct pldm_msg *msg, size_t *payload_length)
 {
 	int rc;
-    struct pldm_msgbuf _buf;
+	struct pldm_msgbuf _buf;
 	struct pldm_msgbuf *buf = &_buf;
 
 	/* Check for consistency of arguments */
@@ -876,7 +876,7 @@ int encode_get_firmware_parameters_resp(
 		return rc;
 	}
 
-    rc = pldm_msgbuf_init_cc(buf, 0, msg->payload, *payload_length);
+	rc = pldm_msgbuf_init_cc(buf, 0, msg->payload, *payload_length);
 	if (rc) {
 		return rc;
 	}
@@ -1716,7 +1716,7 @@ int encode_pass_component_table_resp(uint8_t instance_id,
 				     uint8_t comp_resp,
 				     uint8_t comp_resp_code,
 				     struct pldm_msg *msg,
-				     size_t *payload_length) 
+				     size_t *payload_length)
 {
 	int rc;
 	struct pldm_msgbuf _buf;
@@ -1806,6 +1806,45 @@ int encode_update_component_req(
 	return PLDM_SUCCESS;
 }
 
+int decode_update_component_req(const struct pldm_msg *msg,
+	size_t payload_length,
+	uint16_t *comp_classification, uint16_t *comp_identifier,
+	uint8_t *comp_classification_index, uint32_t *comp_comparison_stamp,
+	uint32_t *comp_image_size, bitfield32_t *update_option_flags,
+	uint8_t *comp_ver_str_type,
+	struct variable_field *comp_ver_str) {
+
+	int rc;
+	struct pldm_msgbuf _buf;
+	struct pldm_msgbuf *buf = &_buf;
+	rc = pldm_msgbuf_init_cc(buf, 0, msg->payload, payload_length);
+	if (rc) {
+		return rc;
+	}
+
+	pldm_msgbuf_extract_p(buf, comp_classification);
+	pldm_msgbuf_extract_p(buf, comp_identifier);
+	pldm_msgbuf_extract_p(buf, comp_classification_index);
+	pldm_msgbuf_extract_p(buf, comp_comparison_stamp);
+	pldm_msgbuf_extract_p(buf, comp_image_size);
+	pldm_msgbuf_extract_p(buf, &update_option_flags->value);
+	pldm_msgbuf_extract_p(buf, comp_ver_str_type);
+	uint8_t ver_len;
+	pldm_msgbuf_extract_p(buf, &ver_len);
+	void* rem = NULL;
+	size_t rem_len;
+	rc = pldm_msgbuf_span_remaining(buf, &rem, &rem_len);
+	if (rc) {
+		return rc;
+	}
+	if (rem_len != ver_len) {
+		return PLDM_ERROR_INVALID_DATA;
+	}
+	comp_ver_str->ptr = rem;
+	comp_ver_str->length = rem_len;
+	return PLDM_SUCCESS;
+}
+
 LIBPLDM_ABI_STABLE
 int decode_update_component_resp(const struct pldm_msg *msg,
 				 size_t payload_length,
@@ -1854,6 +1893,54 @@ int decode_update_component_resp(const struct pldm_msg *msg,
 	return PLDM_SUCCESS;
 }
 
+LIBPLDM_ABI_TESTING
+int encode_update_component_resp(uint8_t instance_id,
+				     uint8_t comp_resp,
+				     uint8_t comp_resp_code,
+				     bitfield32_t update_option_flags_enabled,
+				     uint16_t time_before_req_fw_data,
+				     struct pldm_msg *msg,
+				     size_t *payload_length)
+{
+	int rc;
+	struct pldm_msgbuf _buf;
+	struct pldm_msgbuf *buf = &_buf;
+
+	rc = encode_pldm_header_only(PLDM_RESPONSE, instance_id, PLDM_FWUP,
+				       PLDM_UPDATE_COMPONENT, msg);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_init_cc(buf, 0, msg->payload, *payload_length);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_insert(buf, comp_resp);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_insert(buf, comp_resp_code);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_insert(buf, update_option_flags_enabled.value);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_insert(buf, time_before_req_fw_data);
+	if (rc) {
+		return rc;
+	}
+
+	*payload_length = *payload_length - buf->remaining;
+	return PLDM_SUCCESS;
+}
+
 LIBPLDM_ABI_STABLE
 int decode_request_firmware_data_req(const struct pldm_msg *msg,
 				     size_t payload_length, uint32_t *offset,
@@ -1874,6 +1961,39 @@ int decode_request_firmware_data_req(const struct pldm_msg *msg,
 		return PLDM_FWUP_INVALID_TRANSFER_LENGTH;
 	}
 
+	return PLDM_SUCCESS;
+}
+
+LIBPLDM_ABI_TESTING
+int encode_request_firmware_data_req(uint8_t instance_id,
+				uint32_t offset, uint32_t length,
+				struct pldm_msg *msg, size_t *payload_length)
+{
+	int rc;
+	struct pldm_msgbuf _buf;
+	struct pldm_msgbuf *buf = &_buf;
+
+	rc = encode_pldm_header_only(PLDM_REQUEST, instance_id, PLDM_FWUP,
+				       PLDM_REQUEST_FIRMWARE_DATA, msg);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_init_cc(buf, 0, msg->payload, *payload_length);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_insert(buf, offset);
+	if (rc) {
+		return rc;
+	}
+	rc = pldm_msgbuf_insert(buf, length);
+	if (rc) {
+		return rc;
+	}
+
+	*payload_length = *payload_length - buf->remaining;
 	return PLDM_SUCCESS;
 }
 
@@ -1916,6 +2036,34 @@ int decode_transfer_complete_req(const struct pldm_msg *msg,
 	}
 
 	*transfer_result = msg->payload[0];
+	return PLDM_SUCCESS;
+}
+
+LIBPLDM_ABI_TESTING
+int encode_transfer_complete_req(uint8_t instance_id, uint8_t transfer_result,
+	struct pldm_msg *msg, size_t *payload_length)
+{
+	int rc;
+	struct pldm_msgbuf _buf;
+	struct pldm_msgbuf *buf = &_buf;
+
+	rc = encode_pldm_header_only(PLDM_REQUEST, instance_id, PLDM_FWUP,
+				       PLDM_TRANSFER_COMPLETE, msg);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_init_cc(buf, 0, msg->payload, *payload_length);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_insert(buf, transfer_result);
+	if (rc) {
+		return rc;
+	}
+
+	*payload_length = *payload_length - buf->remaining;
 	return PLDM_SUCCESS;
 }
 
@@ -2306,5 +2454,18 @@ int decode_cancel_update_resp(const struct pldm_msg *msg, size_t payload_length,
 			le64toh(response->non_functioning_component_bitmap);
 	}
 
+	return PLDM_SUCCESS;
+}
+
+LIBPLDM_ABI_TESTING
+int pldm_firmware_variable_to_string(enum pldm_firmware_update_string_type str_type,
+	const struct variable_field *var, struct pldm_firmware_string *str) {
+	if (var->length > PLDM_FIRMWARE_MAX_STRING) {
+		return PLDM_ERROR_INVALID_LENGTH;
+	}
+
+	str->str_len = var->length;
+	str->str_type = str_type;
+	memcpy(str->str_data, var->ptr, var->length);
 	return PLDM_SUCCESS;
 }
