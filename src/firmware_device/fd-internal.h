@@ -13,6 +13,8 @@ typedef uint64_t pldm_fd_time_t;
 
 struct pldm_fd_req {
     enum {
+        // pldm_fd_req instance is unused
+        PLDM_FD_REQ_UNUSED = 0,
         // Ready to send a request
         PLDM_FD_REQ_READY,
         // Waiting for a response
@@ -22,36 +24,23 @@ struct pldm_fd_req {
         PLDM_FD_REQ_FAILED,
     } state;
 
+    /* Set once when ready to move to next state, will return
+     * this result for TransferComplete/VerifyComplete/ApplyComplete request. */
+    bool complete;
+    uint8_t result;
+
     /* Only valid in SENT state */
-    uint8_t instance;
+    uint8_t instance_id;
     uint8_t command;
     pldm_fd_time_t sent_time;
-
-    /* Only valid in FAILED state */
-    uint8_t failed_ccode;
-
-    /* Instance ID of last request */
-    uint8_t instance_id;
 };
 
 struct pldm_fd_download {
-    /* Set once when ready to exit from Download mode, will return
-     * this value for TransferComplete request. */
-    bool complete;
-    enum pldm_firmware_update_transfer_result_values result;
-
     bitfield32_t update_flags;
     uint32_t offset;
 };
 
-struct pldm_fd_verify {
-    bool complete;
-    enum pldm_firmware_update_verify_result_values result;
-};
-
 struct pldm_fd_apply {
-    bool complete;
-    enum pldm_firmware_update_apply_result_values result;
     bitfield16_t activation_methods;
 };
 
@@ -68,7 +57,6 @@ struct pldm_fd {
 
     union {
         struct pldm_fd_download download;
-        struct pldm_fd_verify verify;
         struct pldm_fd_apply apply;
     } specific;
     /* Details of the component currently being updated.
@@ -79,8 +67,9 @@ struct pldm_fd {
     /* Used for download/verify/apply requests */
     struct pldm_fd_req req;
 
-    pldm_tid_t ua_tid;
-    bool ua_tid_set;
+    /* Address of the UA */
+    uint8_t ua_address;
+    bool ua_address_set;
 
     /* Maximum size allowed by the UA */
     uint32_t max_transfer;

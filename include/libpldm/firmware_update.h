@@ -1604,6 +1604,14 @@ int decode_get_status_resp(const struct pldm_msg *msg, size_t payload_length,
 			   uint8_t *reason_code,
 			   bitfield32_t *update_option_flags_enabled);
 
+int encode_get_status_resp(uint8_t instance_id,
+			   uint8_t current_state, uint8_t previous_state, 
+			   uint8_t aux_state, uint8_t aux_state_status, 
+			   uint8_t progress_percent, uint8_t reason_code,
+			   bitfield32_t update_option_flags_enabled,
+			   struct pldm_msg *msg, size_t *payload_length
+			   );
+
 /** @brief Create PLDM request message for CancelUpdateComponent
  *
  *  @param[in] instance_id - Message's instance id

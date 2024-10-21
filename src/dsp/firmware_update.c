@@ -710,20 +710,16 @@ int encode_query_device_identifiers_resp(uint8_t instance_id,
 		return rc;
 	}
 
-	rc = pldm_msgbuf_insert_uint8(buf, PLDM_SUCCESS);
-	if (rc) {
-		return rc;
-	}
-	rc = pldm_msgbuf_insert(buf, device_identifiers_len);
-	if (rc) {
-		return rc;
-	}
-	rc = pldm_msgbuf_insert(buf, descriptor_count);
-	if (rc) {
-		return rc;
-	}
+	pldm_msgbuf_insert_uint8(buf, PLDM_SUCCESS);
+	pldm_msgbuf_insert(buf, device_identifiers_len);
+	pldm_msgbuf_insert(buf, descriptor_count);
 	rc = pldm_msgbuf_insert_array(buf, device_identifiers_len,
 		descriptor_data, device_identifiers_len);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_validate(buf);
 	if (rc) {
 		return rc;
 	}
@@ -1486,10 +1482,10 @@ int decode_request_update_req(const struct pldm_msg *msg, size_t payload_length,
 	pldm_msgbuf_extract_p(buf, max_outstanding_transfer_req);
 	pldm_msgbuf_extract_p(buf, pkg_data_len);
 	pldm_msgbuf_extract_p(buf, comp_image_set_ver_str_type);
-	uint8_t ver_len;
+	uint8_t ver_len = 0;
 	pldm_msgbuf_extract_p(buf, &ver_len);
 	void* rem = NULL;
-	size_t rem_len;
+	size_t rem_len = 0;
 	rc = pldm_msgbuf_span_remaining(buf, &rem, &rem_len);
 	if (rc) {
 		return rc;
@@ -1558,16 +1554,16 @@ int encode_request_update_resp(uint8_t instance_id,
 		return rc;
 	}
 
-	rc = pldm_msgbuf_insert(buf, fd_meta_data_len);
-	if (rc) {
-		return rc;
-	}
-	rc = pldm_msgbuf_insert(buf, fd_will_send_pkg_data);
-	if (rc) {
-		return rc;
-	}
+	pldm_msgbuf_insert_uint8(buf, PLDM_SUCCESS);
+	pldm_msgbuf_insert(buf, fd_meta_data_len);
+	pldm_msgbuf_insert(buf, fd_will_send_pkg_data);
 
 	/* TODO: DSP0267 1.3.0 adds GetPackageDataMaximumTransferSize */
+
+	rc = pldm_msgbuf_validate(buf);
+	if (rc) {
+		return rc;
+	}
 
 	*payload_length = *payload_length - buf->remaining;
 	return PLDM_SUCCESS;
@@ -1657,10 +1653,10 @@ int decode_pass_component_table_req(const struct pldm_msg *msg,
 	pldm_msgbuf_extract_p(buf, comp_classification_index);
 	pldm_msgbuf_extract_p(buf, comp_comparison_stamp);
 	pldm_msgbuf_extract_p(buf, comp_ver_str_type);
-	uint8_t ver_len;
+	uint8_t ver_len = 0;
 	pldm_msgbuf_extract_p(buf, &ver_len);
 	void* rem = NULL;
-	size_t rem_len;
+	size_t rem_len = 0;
 	rc = pldm_msgbuf_span_remaining(buf, &rem, &rem_len);
 	if (rc) {
 		return rc;
@@ -1733,12 +1729,11 @@ int encode_pass_component_table_resp(uint8_t instance_id,
 		return rc;
 	}
 
-	rc = pldm_msgbuf_insert(buf, comp_resp);
-	if (rc) {
-		return rc;
-	}
+	pldm_msgbuf_insert_uint8(buf, PLDM_SUCCESS);
+	pldm_msgbuf_insert(buf, comp_resp);
+	pldm_msgbuf_insert(buf, comp_resp_code);
 
-	rc = pldm_msgbuf_insert(buf, comp_resp_code);
+	rc = pldm_msgbuf_validate(buf);
 	if (rc) {
 		return rc;
 	}
@@ -1829,10 +1824,10 @@ int decode_update_component_req(const struct pldm_msg *msg,
 	pldm_msgbuf_extract_p(buf, comp_image_size);
 	pldm_msgbuf_extract_p(buf, &update_option_flags->value);
 	pldm_msgbuf_extract_p(buf, comp_ver_str_type);
-	uint8_t ver_len;
+	uint8_t ver_len = 0;
 	pldm_msgbuf_extract_p(buf, &ver_len);
 	void* rem = NULL;
-	size_t rem_len;
+	size_t rem_len = 0;
 	rc = pldm_msgbuf_span_remaining(buf, &rem, &rem_len);
 	if (rc) {
 		return rc;
@@ -1917,22 +1912,13 @@ int encode_update_component_resp(uint8_t instance_id,
 		return rc;
 	}
 
-	rc = pldm_msgbuf_insert(buf, comp_resp);
-	if (rc) {
-		return rc;
-	}
+	pldm_msgbuf_insert_uint8(buf, PLDM_SUCCESS);
+	pldm_msgbuf_insert(buf, comp_resp);
+	pldm_msgbuf_insert(buf, comp_resp_code);
+	pldm_msgbuf_insert(buf, update_option_flags_enabled.value);
+	pldm_msgbuf_insert(buf, time_before_req_fw_data);
 
-	rc = pldm_msgbuf_insert(buf, comp_resp_code);
-	if (rc) {
-		return rc;
-	}
-
-	rc = pldm_msgbuf_insert(buf, update_option_flags_enabled.value);
-	if (rc) {
-		return rc;
-	}
-
-	rc = pldm_msgbuf_insert(buf, time_before_req_fw_data);
+	rc = pldm_msgbuf_validate(buf);
 	if (rc) {
 		return rc;
 	}
@@ -2347,6 +2333,48 @@ int decode_get_status_resp(const struct pldm_msg *msg, size_t payload_length,
 	update_option_flags_enabled->value =
 		le32toh(response->update_option_flags_enabled.value);
 
+	return PLDM_SUCCESS;
+}
+
+LIBPLDM_ABI_TESTING
+int encode_get_status_resp(uint8_t instance_id,
+			   uint8_t current_state, uint8_t previous_state, 
+			   uint8_t aux_state, uint8_t aux_state_status, 
+			   uint8_t progress_percent, uint8_t reason_code,
+			   bitfield32_t update_option_flags_enabled,
+			   struct pldm_msg *msg, size_t *payload_length
+			   ) 
+{
+	int rc;
+	struct pldm_msgbuf _buf;
+	struct pldm_msgbuf *buf = &_buf;
+
+	rc = encode_pldm_header_only(PLDM_RESPONSE, instance_id, PLDM_FWUP,
+				       PLDM_GET_STATUS, msg);
+	if (rc) {
+		return rc;
+	}
+
+	rc = pldm_msgbuf_init_cc(buf, 0, msg->payload, *payload_length);
+	if (rc) {
+		return rc;
+	}
+
+	pldm_msgbuf_insert_uint8(buf, PLDM_SUCCESS);
+	pldm_msgbuf_insert(buf, current_state);
+	pldm_msgbuf_insert(buf, previous_state);
+	pldm_msgbuf_insert(buf, aux_state);
+	pldm_msgbuf_insert(buf, aux_state_status);
+	pldm_msgbuf_insert(buf, progress_percent);
+	pldm_msgbuf_insert(buf, reason_code);
+	pldm_msgbuf_insert(buf, update_option_flags_enabled.value);
+
+	rc = pldm_msgbuf_validate(buf);
+	if (rc) {
+		return rc;
+	}
+
+	*payload_length = *payload_length - buf->remaining;
 	return PLDM_SUCCESS;
 }
 

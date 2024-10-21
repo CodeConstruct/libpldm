@@ -47,11 +47,46 @@ static void pldm_fd_set_state(struct pldm_fd *fd,
 	}
 
 	fd->prev_state = fd->state;
-	fd->state = fd->state;
+	fd->state = state;
+}
+
+
+// static void pldm_fd_set_idle(struct pldm_fd *fd,
+// 	enum pldm_get_status_reason_code_values reason) {
+// 	fd->prev_state = fd->state;
+// 	fd->ua_address_set = false;
+// 	fd->reason = reason;
+// }
+
+static void pldm_fd_get_aux_state(const struct pldm_fd *fd, uint8_t *aux_state, uint8_t *aux_state_status) {
+	*aux_state_status = 0;
+
+	switch (fd->req.state) {
+	case PLDM_FD_REQ_UNUSED:
+		*aux_state = PLDM_FD_IDLE_LEARN_COMPONENTS_READ_XFER;
+		break;
+	case PLDM_FD_REQ_SENT:
+		*aux_state = PLDM_FD_OPERATION_IN_PROGRESS;
+		break;
+	case PLDM_FD_REQ_READY:
+		if (fd->req.complete) {
+			*aux_state = PLDM_FD_OPERATION_SUCCESSFUL;
+		} else {
+			*aux_state = PLDM_FD_OPERATION_IN_PROGRESS;
+		}
+		break;
+	case PLDM_FD_REQ_FAILED:
+		*aux_state = PLDM_FD_OPERATION_FAILED;
+		*aux_state_status = fd->req.result;
+		break;
+	}
 }
 
 static bool pldm_fd_req_should_send(struct pldm_fd_req *req, pldm_fd_time_t now) {
 	switch (req->state) {
+		case PLDM_FD_REQ_UNUSED:
+			assert(0);
+			return false;
 		case PLDM_FD_REQ_READY:
 			return true;
 		case PLDM_FD_REQ_FAILED:
@@ -74,13 +109,6 @@ static uint8_t pldm_fd_req_next_instance(struct pldm_fd_req *req) {
 	req->instance_id = (req->instance_id + 1) % INSTANCE_ID_COUNT;
 	return req->instance_id;
 }
-
-// static void pldm_fd_set_idle(struct pldm_fd *fd,
-// 	enum pldm_get_status_reason_code_values reason) {
-// 	fd->prev_state = fd->state;
-// 	fd->ua_tid_set = false;
-// 	fd->reason = reason;
-// }
 
 static pldm_requester_rc_t pldm_fd_qdi(struct pldm_fd *fd,
 	const struct pldm_header_info *hdr,
@@ -238,7 +266,7 @@ static pldm_requester_rc_t pldm_fd_request_update(struct pldm_fd *fd,
 	const struct pldm_header_info *hdr,
 	const struct pldm_msg *req, size_t req_payload_len,
 	struct pldm_msg *resp, size_t *resp_payload_len,
-	pldm_tid_t tid)
+	uint8_t address)
 {
 	uint8_t ccode;
 
@@ -279,8 +307,8 @@ static pldm_requester_rc_t pldm_fd_request_update(struct pldm_fd *fd,
 		// Limit to locally allowed size
 		fd->max_transfer = fd->local_max_transfer;
 	}
-	fd->ua_tid = tid;
-	fd->ua_tid_set = true;
+	fd->ua_address = address;
+	fd->ua_address_set = true;
 	// TODO: Update update_timestamp_fd_t1
 
 	pldm_fd_set_state(fd, PLDM_FD_STATE_LEARN_COMPONENTS);
@@ -434,12 +462,59 @@ static pldm_requester_rc_t pldm_fd_update_comp(struct pldm_fd *fd,
 	return PLDM_SUCCESS;
 }
 
-static pldm_requester_rc_t pldm_fd_handle_resp(struct pldm_fd *fd, pldm_tid_t tid,
-	const void *msg, size_t msg_len)
+static pldm_requester_rc_t pldm_fd_get_status(struct pldm_fd *fd,
+	const struct pldm_header_info *hdr,
+	const struct pldm_msg *req, size_t req_payload_len,
+	struct pldm_msg *resp, size_t *resp_payload_len)
 {
-	// TODO
-	return PLDM_REQUESTER_INVALID_SETUP;
+	uint8_t ccode;
+
+	/* No request data */
+	if (req_payload_len != PLDM_GET_STATUS_REQ_BYTES) {
+		return pldm_fd_reply_error(PLDM_ERROR_INVALID_LENGTH,
+			hdr, resp, resp_payload_len);
+	}
+
+	/* Defaults */
+	uint8_t aux_state = 0;
+	uint8_t aux_state_status = 0;
+	/* 101 is "progress not supported" */
+	uint8_t progress_percent = 101;
+	uint8_t reason_code = 0;
+	bitfield32_t update_option_flags_enabled = { .value = 0 };
+
+	pldm_fd_get_aux_state(fd, &aux_state, &aux_state_status);
+
+	switch (fd->state) {
+	case PLDM_FD_STATE_IDLE:
+		reason_code = fd->reason;
+		break;
+	case PLDM_FD_STATE_DOWNLOAD:
+        struct pldm_fd_download *dl = &fd->specific.download;
+		if (fd->update_comp.comp_image_size > 0) {
+            uint32_t one_percent = fd->update_comp.comp_image_size / 100;
+            if (fd->update_comp.comp_image_size % 100 != 0) {
+            	one_percent += 1;
+            }
+            progress_percent = (dl->offset / one_percent);
+		}
+		update_option_flags_enabled = dl->update_flags;
+		break;
+	default:
+		break;
+	}
+
+	ccode = encode_get_status_resp(hdr->instance, fd->state, fd->prev_state,
+		aux_state, aux_state_status,
+		progress_percent, reason_code, update_option_flags_enabled,
+		resp, resp_payload_len);
+	if (ccode) {
+		return pldm_fd_reply_error(ccode, hdr, resp, resp_payload_len);
+	}
+
+	return PLDM_REQUESTER_SUCCESS;
 }
+
 
 static uint32_t pldm_fd_fwdata_size(struct pldm_fd *fd) {
 	if (fd->state != PLDM_FD_STATE_DOWNLOAD) {
@@ -460,33 +535,128 @@ static uint32_t pldm_fd_fwdata_size(struct pldm_fd *fd) {
 	return size;
 }
 
+
+static pldm_requester_rc_t pldm_fd_handle_fwdata_resp(struct pldm_fd *fd,
+	const struct pldm_msg *resp, size_t resp_payload_len)
+{
+	if (fd->state != PLDM_FD_STATE_DOWNLOAD) {
+		return PLDM_REQUESTER_RECV_FAIL;
+	}
+
+	struct pldm_fd_download *dl = &fd->specific.download;
+	if (fd->req.complete) {
+		/* Received data after completion */
+		return PLDM_REQUESTER_RECV_FAIL;
+	}
+
+	if (resp->payload[0] != PLDM_SUCCESS) {
+		/* If the UA returns failure, ignore the response and let the retry
+		 * timer send another request. */
+		return PLDM_REQUESTER_SUCCESS;
+	}
+
+	uint32_t fwdata_size = pldm_fd_fwdata_size(fd);
+	if (resp_payload_len != fwdata_size+1) {
+		/* Data is incorrect size. Could indicate MCTP corruption, drop it
+		 * and let retry timer handle it */
+		return PLDM_REQUESTER_RECV_FAIL;
+	}
+
+	/* Provide the data chunk to the device */
+	uint8_t res = fd->ops->firmware_data(fd->ops_ctx,
+		 	dl->offset, &resp->payload[1], fwdata_size, &fd->update_comp);
+
+	fd->req.state = PLDM_FD_REQ_READY;
+	if (res == PLDM_FWUP_TRANSFER_SUCCESS) {
+		/* Move to next offset */
+		dl->offset += fwdata_size;
+		if (dl->offset == fd->update_comp.comp_image_size) {
+			/* Mark as complete, next progress() call will send the TransferComplete request */
+			fd->req.complete = true;
+			fd->req.result = PLDM_FWUP_TRANSFER_SUCCESS;
+		}
+	} else {
+		/* Pass the callback error as the TransferResult */
+		fd->req.complete = true;
+		fd->req.result = res;
+	}
+
+	return PLDM_REQUESTER_SUCCESS;
+}
+
+static pldm_requester_rc_t pldm_fd_handle_resp(struct pldm_fd *fd, uint8_t address,
+	const void *resp_msg, size_t resp_len)
+{
+	if (!(fd->ua_address_set && fd->ua_address == address)) {
+		// Either an early response, or a resopnse from a wrong EID */
+		return PLDM_REQUESTER_RECV_FAIL;
+	}
+
+	/* Must have a ccode */
+	if (resp_len < sizeof(struct pldm_msg_hdr) + 1) {
+		return PLDM_REQUESTER_INVALID_RECV_LEN;
+	}
+	size_t resp_payload_len = resp_len - sizeof(struct pldm_msg_hdr);
+	const struct pldm_msg *resp = resp_msg;
+
+	if (fd->req.state != PLDM_FD_REQ_SENT) {
+		// No response was expected
+		return PLDM_REQUESTER_RECV_FAIL;
+	}
+
+	if (fd->req.instance_id != resp->hdr.instance_id) {
+		// Response wasn't for the expected request
+		return PLDM_REQUESTER_RECV_FAIL;
+	}
+	if (fd->req.command != resp->hdr.command) {
+		// Response wasn't for the expected request
+		return PLDM_REQUESTER_RECV_FAIL;
+	}
+
+	switch (resp->hdr.command) {
+	case PLDM_REQUEST_FIRMWARE_DATA:
+		return pldm_fd_handle_fwdata_resp(fd, resp, resp_payload_len);
+		break;
+	case PLDM_TRANSFER_COMPLETE:
+	case PLDM_APPLY_COMPLETE:
+	case PLDM_VERIFY_COMPLETE:
+        /* Ignore replies to these requests.
+         * We may have already moved on to a later state
+         * and don't have any useful retry for them. */
+		return PLDM_REQUESTER_SUCCESS;
+	default:
+		/* Unsolicited response */
+		return PLDM_REQUESTER_RECV_FAIL;
+	}
+}
+
 static pldm_requester_rc_t pldm_fd_progress_download(struct pldm_fd *fd,
-	struct pldm_msg *req, size_t *req_payload_len, pldm_fd_time_t now)
+	struct pldm_msg *req, size_t *req_payload_len)
 {
 	int rc;
 
-	if (!pldm_fd_req_should_send(&fd->req, now)) {
+	if (!pldm_fd_req_should_send(&fd->req, fd->ops->now(fd->ops_ctx))) {
 		/* Nothing to do */
 		return PLDM_REQUESTER_SUCCESS;
 	}
 
 	uint8_t instance_id = pldm_fd_req_next_instance(&fd->req);
 	struct pldm_fd_download *dl = &fd->specific.download;
-	if (dl->complete) {
+	if (fd->req.complete) {
 		rc = encode_transfer_complete_req(instance_id,
-			dl->result, req, req_payload_len);
+			fd->req.result, req, req_payload_len);
 		if (rc) {
 			return PLDM_REQUESTER_SEND_FAIL;
 		}
 
-		if (dl->result == PLDM_FWUP_TRANSFER_SUCCESS) {
+		if (fd->req.result == PLDM_FWUP_TRANSFER_SUCCESS) {
 			/* Switch to Verify, don't wait for a response */
 			fd->req.state = PLDM_FD_REQ_READY;
 			pldm_fd_set_state(fd, PLDM_FD_STATE_VERIFY);
 		} else {
 			/* Wait for UA to cancel */
 			fd->req.state = PLDM_FD_REQ_FAILED;
-			fd->req.failed_ccode = dl->result;
+			/* TODO: Set AuxStateStatus */
 		}
 	} else {
 		/* Send a new RequestFirmwareData */
@@ -501,7 +671,7 @@ static pldm_requester_rc_t pldm_fd_progress_download(struct pldm_fd *fd,
 		fd->req.state = PLDM_FD_REQ_SENT;
 		fd->req.instance_id = req->hdr.instance_id;
 		fd->req.command = req->hdr.command;
-		fd->req.sent_time = now;
+		fd->req.sent_time = fd->ops->now(fd->ops_ctx);
 	}
 
 	return PLDM_REQUESTER_SUCCESS;
@@ -531,7 +701,7 @@ pldm_requester_rc_t pldm_fd_setup(struct pldm_fd *fd,
 
 /* A response should only be used when this returns PLDM_SUCCESS, and *resp_len > 0 */
 LIBPLDM_ABI_TESTING
-pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
+pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, uint8_t address,
 	const void *req_msg, size_t req_len,
 	void *resp_msg, size_t *resp_len)
 {
@@ -563,14 +733,14 @@ pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
 
 	if (hdr.msg_type == PLDM_RESPONSE) {
 		*resp_len = 0;
-		return pldm_fd_handle_resp(fd, tid, req_msg, req_len);
+		return pldm_fd_handle_resp(fd, address, req_msg, req_len);
 	}
 
 	if (hdr.msg_type != PLDM_REQUEST) {
 		return PLDM_REQUESTER_RECV_FAIL;
 	}
 
-	/* Check TID */
+	/* Check address */
 	switch (hdr.command) {
 		case PLDM_QUERY_DEVICE_IDENTIFIERS:
 		case PLDM_GET_FIRMWARE_PARAMETERS:
@@ -582,11 +752,11 @@ pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
 			/* Information or cancel commands are always allowed */
 			break;
 		case PLDM_REQUEST_UPDATE:
-			/* Command handler will set TID */
+			/* Command handler will set address */
 			break;
 		default:
-			/* Requests must come from the same TID that requested the update */
-			if (!fd->ua_tid_set || tid != fd->ua_tid) {
+			/* Requests must come from the same address that requested the update */
+			if (!fd->ua_address_set || address != fd->ua_address) {
 				return pldm_fd_reply_error(PLDM_ERROR_NOT_READY, &hdr, resp, &resp_payload_len);
 			}
 	}
@@ -601,13 +771,16 @@ pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
 			break;
 		case PLDM_REQUEST_UPDATE:
 			rc = pldm_fd_request_update(fd, &hdr, req, req_payload_len, resp, &resp_payload_len,
-				tid);
+				address);
 			break;
 		case PLDM_PASS_COMPONENT_TABLE:
 			rc = pldm_fd_pass_comp(fd, &hdr, req, req_payload_len, resp, &resp_payload_len);
 			break;
 		case PLDM_UPDATE_COMPONENT:
 			rc = pldm_fd_update_comp(fd, &hdr, req, req_payload_len, resp, &resp_payload_len);
+			break;
+		case PLDM_GET_STATUS:
+			rc = pldm_fd_get_status(fd, &hdr, req, req_payload_len, resp, &resp_payload_len);
 			break;
 		default:
 			rc = pldm_fd_reply_error(PLDM_ERROR_UNSUPPORTED_PLDM_CMD, &hdr, resp, &resp_payload_len);
@@ -622,7 +795,7 @@ pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
 
 LIBPLDM_ABI_TESTING
 pldm_requester_rc_t pldm_fd_progress(struct pldm_fd *fd,
-	void *req_msg, size_t *req_len, pldm_fd_time_t now)
+	void *req_msg, size_t *req_len, uint8_t *address)
 {
 	int rc;
 
@@ -632,17 +805,19 @@ pldm_requester_rc_t pldm_fd_progress(struct pldm_fd *fd,
 	}
 	size_t req_payload_len = *req_len - sizeof(struct pldm_msg_hdr);
 	struct pldm_msg *req = req_msg;
+	*req_len = 0;
 
 	switch (fd->state) {
 	case PLDM_FD_STATE_DOWNLOAD:
-		rc = pldm_fd_progress_download(fd, req, &req_payload_len, now);
+		rc = pldm_fd_progress_download(fd, req, &req_payload_len);
 		break;
 	default:
 		return PLDM_REQUESTER_SUCCESS;
 	}
 
-	if (rc == PLDM_REQUESTER_SUCCESS) {
+	if (rc == PLDM_REQUESTER_SUCCESS && fd->ua_address_set) {
 		*req_len = req_payload_len + sizeof(struct pldm_msg_hdr);
+		*address = fd->ua_address;
 	}
 
 	return rc;

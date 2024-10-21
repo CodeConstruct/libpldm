@@ -50,6 +50,18 @@ struct pldm_fd_ops {
 
 	enum pldm_component_response_codes (*update_component)(void *ctx,
 		bool update, const struct pldm_firmware_update_component *comp);
+
+	/* Returns a TransferComplete code,
+	 * enum pldm_firmware_update_common_error_codes or
+	 * enum pldm_firmware_update_transfer_result_values.
+	 *
+	 * PLDM_FWUP_TRANSFER_SUCCESS will accept the data chunk, other codes will
+	 * abort the transfer, returning that code as TransferComplete */
+	uint8_t (*firmware_data)(void* ctx, uint32_t offset, const uint8_t *data, uint32_t len,
+		const struct pldm_firmware_update_component *comp);
+
+	/* Returns a monotonic timestamp, in milliseconds. Must not go backwards. */
+	uint64_t (*now)(void *ctx);
 };
 
 /* Static storage can be allocated with
@@ -61,6 +73,9 @@ pldm_requester_rc_t pldm_fd_setup(struct pldm_fd *fd,
 	uint32_t max_transfer,
 	const struct pldm_fd_ops *ops, void *ops_ctx);
 
-pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, pldm_tid_t tid,
+pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, uint8_t remote_address,
 	const void *pldm_msg, size_t msg_len,
 	void *resp_msg, size_t *resp_len);
+
+pldm_requester_rc_t pldm_fd_progress(struct pldm_fd *fd,
+	void *req_msg, size_t *req_len, uint8_t *remote_address);
