@@ -2,6 +2,9 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <stdio.h>
+#include <stdlib.h>
+
 #include <libpldm/pldm.h>
 #include <libpldm/firmware_update.h>
 #include <libpldm/firmware_fd.h>
@@ -47,6 +50,8 @@ const bitfield8_t PLDM_FD_COMMANDS[32] = {
 	},
 };
 
+static int do_printf = 9;
+
 static pldm_requester_rc_t
 pldm_fd_reply_error(uint8_t ccode, const struct pldm_header_info *req_hdr,
 		    struct pldm_msg *resp, size_t *resp_payload_len)
@@ -79,6 +84,8 @@ static void pldm_fd_set_state(struct pldm_fd *fd,
 
 	fd->prev_state = fd->state;
 	fd->state = state;
+	if (do_printf == 1)
+		fprintf(stderr, "state %d -> %d\n", fd->prev_state, fd->state);
 }
 
 static void pldm_fd_set_idle(struct pldm_fd *fd,
@@ -1160,6 +1167,14 @@ pldm_requester_rc_t pldm_fd_setup(struct pldm_fd *fd, size_t pldm_fd_size,
 {
 	pldm_requester_rc_t rc;
 
+	if (do_printf == 9) {
+		if (getenv("TRACEFWFD")) {
+			do_printf = 1;
+		} else {
+			do_printf = 0;
+		}
+	}
+
 	if (pldm_fd_size < sizeof(struct pldm_fd)) {
 		/* Safety check that sufficient storage was provided for *fd,
 		 * in case PLDM_SIZEOF_PLDM_FD is incorrect */
@@ -1258,6 +1273,8 @@ pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, uint8_t remote_addres
 
 	/* Dispatch command.
 	 Update PLDM_FD_COMMANDS if adding new handlers */
+	if (do_printf == 1)
+		fprintf(stderr, "pldm fw command 0x%02x\n", hdr.command);
 	switch (hdr.command) {
 	case PLDM_QUERY_DEVICE_IDENTIFIERS:
 		rc = pldm_fd_qdi(fd, &hdr, req, req_payload_len, resp,
@@ -1299,6 +1316,8 @@ pldm_requester_rc_t pldm_fd_handle_msg(struct pldm_fd *fd, uint8_t remote_addres
 		rc = pldm_fd_reply_error(PLDM_ERROR_UNSUPPORTED_PLDM_CMD, &hdr,
 					 resp, &resp_payload_len);
 	}
+	if (do_printf == 1)
+		fprintf(stderr, "-> rc %d. state %d\n", rc, fd->state);
 
 	if (rc == PLDM_REQUESTER_SUCCESS) {
 		*resp_len = resp_payload_len + sizeof(struct pldm_msg_hdr);
@@ -1347,6 +1366,10 @@ pldm_requester_rc_t pldm_fd_progress(struct pldm_fd *fd, void *req_msg,
 
 	if (rc == PLDM_REQUESTER_SUCCESS && fd->ua_address_set &&
 	    req_payload_len > 0) {
+		if (do_printf == 1)
+			fprintf(stderr, "progress sent 0x%02x, len %zu\n",
+				((uint8_t*)req_msg)[2], req_payload_len);
+
 		*req_len = req_payload_len + sizeof(struct pldm_msg_hdr);
 		*address = fd->ua_address;
 	}
